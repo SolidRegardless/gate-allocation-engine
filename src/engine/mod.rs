@@ -5,9 +5,13 @@ use uuid::Uuid;
 
 use crate::domain::*;
 
+/// Minimum clearance added after scheduled departure to account for deboarding and pushback.
 const TURNAROUND_BUFFER_MINUTES: i64 = 15;
+/// Score penalty per size class when a gate is larger than the aircraft requires.
 const PENALTY_OVERSIZED_GATE: f64 = 10.0;
+/// Score penalty when preferred gates were specified but this gate is not among them.
 const PENALTY_PREFERRED_MISS: f64 = 5.0;
+/// Score reward (negative penalty) when the gate is on the caller's preferred list.
 const REWARD_PREFERRED_GATE: f64 = -3.0;
 
 pub struct AllocationEngine {
@@ -101,12 +105,16 @@ impl AllocationEngine {
         }
     }
 
+    /// Returns true if any existing assignment on `gate_id` overlaps the half-open interval
+    /// `[from, until)`.  Two windows overlap when neither ends before the other starts.
     fn has_conflict(&self, gate_id: &str, from: DateTime<Utc>, until: DateTime<Utc>) -> bool {
         self.assignments.iter().any(|a| {
             a.gate.gate_id == gate_id && a.assigned_from < until && a.assigned_until > from
         })
     }
 
+    /// Compute a score for `gate`; lower is better.  The algorithm penalises oversized gates
+    /// (waste of capacity) and gates outside the caller's preferred list, and rewards preferred ones.
     fn score_gate(&self, gate: &Gate, aircraft_size: AircraftSize, preferred: &[String]) -> f64 {
         let mut score = 0.0;
         let size_diff = (gate.size as i32) - (aircraft_size as i32);
@@ -156,8 +164,8 @@ impl AllocationEngine {
                     if conflict {
                         info!(flight = %flight_clone.flight_id, gate = %gate_id, "Delay conflict - re-allocating");
                         let mut shifted = flight_clone;
-                        shifted.scheduled_arrival = shifted.scheduled_arrival + delay;
-                        shifted.scheduled_departure = shifted.scheduled_departure + delay;
+                        shifted.scheduled_arrival += delay;
+                        shifted.scheduled_departure += delay;
                         shifted.status = FlightStatus::Delayed;
                         if let Some(new_a) = self
                             .allocate_gate(&shifted, &shifted.destination, &[gate_id])
@@ -201,6 +209,7 @@ impl AllocationEngine {
                 }
             }
             DisruptionType::GateUnavailable => {
+                // The gate identifier is carried in `description` (e.g. "T5-A1").
                 let gate_id = event.description.clone();
                 let affected: Vec<Flight> = self
                     .assignments
@@ -234,6 +243,9 @@ impl AllocationEngine {
                     ),
                 }
             }
+            // Diversion removes the flight's assignment (it is landing elsewhere).
+            // Weather and Mechanical are informational — no gate changes are made here;
+            // the operator handles them manually via subsequent AllocateGate / ReportDisruption calls.
             _ => {
                 if event.disruption_type == DisruptionType::Diversion {
                     self.assignments

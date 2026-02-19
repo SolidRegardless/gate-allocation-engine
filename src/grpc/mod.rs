@@ -25,6 +25,9 @@ impl AllocationGrpcService {
     }
 }
 
+/// Convert a Unix timestamp to `DateTime<Utc>`, falling back to *now* for invalid values.
+/// This is intentionally lenient — the engine records reported_at via `Utc::now()` anyway,
+/// so a zero or malformed timestamp from the caller does not cause a hard failure.
 fn ts_to_dt(ts: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)
 }
@@ -113,6 +116,9 @@ impl AllocationService for AllocationGrpcService {
                 Ok(DisruptionType::Cancellation) => domain::DisruptionType::Cancellation,
                 Ok(DisruptionType::Diversion) => domain::DisruptionType::Diversion,
                 Ok(DisruptionType::GateUnavailable) => domain::DisruptionType::GateUnavailable,
+                Ok(DisruptionType::Weather) => domain::DisruptionType::Weather,
+                Ok(DisruptionType::Mechanical) => domain::DisruptionType::Mechanical,
+                // Unknown / unrecognised codes are treated as a Delay (conservative default).
                 _ => domain::DisruptionType::Delay,
             },
             affected_flight_id: af.flight_id.clone(),
@@ -152,6 +158,9 @@ impl AllocationService for AllocationGrpcService {
     type StreamDisruptionsStream =
         tokio_stream::wrappers::ReceiverStream<Result<proto::DisruptionEvent, Status>>;
 
+    /// Stub implementation — returns an immediately-closed stream.
+    /// A full implementation would store the `tx` sender on `AllocationGrpcService` (wrapped in a
+    /// `broadcast::Sender`) and push `DisruptionEvent` messages whenever `handle_disruption` is called.
     async fn stream_disruptions(
         &self,
         _req: Request<StreamDisruptionsRequest>,
