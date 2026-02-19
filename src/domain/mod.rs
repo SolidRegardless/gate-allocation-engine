@@ -20,11 +20,24 @@ impl fmt::Display for AircraftSize {
     }
 }
 
+/// Wide-body aircraft types that require a Large gate.
+const LARGE_AIRCRAFT_TYPES: &[&str] = &["A350", "A380", "B777", "B787", "B747", "A330", "A340"];
+/// Regional jets and turboprops that fit a Small gate.
+const SMALL_AIRCRAFT_TYPES: &[&str] = &["E190", "E195", "ATR72", "ATR42", "CRJ900", "CRJ700"];
+
+/// Map an ICAO/common aircraft designator to a gate-size category.
+/// The default returns `Medium`, which covers the most common unrecognised
+/// narrowbodies (e.g. B737 family variants not explicitly listed above).
+/// To add a new aircraft type, append its designator to the appropriate const above.
 pub fn classify_aircraft(aircraft_type: &str) -> AircraftSize {
-    match aircraft_type.to_uppercase().as_str() {
-        "A350" | "A380" | "B777" | "B787" | "B747" | "A330" | "A340" => AircraftSize::Large,
-        "E190" | "E195" | "ATR72" | "ATR42" | "CRJ900" | "CRJ700" => AircraftSize::Small,
-        _ => AircraftSize::Medium,
+    let t = aircraft_type.to_uppercase();
+    let t = t.as_str();
+    if LARGE_AIRCRAFT_TYPES.contains(&t) {
+        AircraftSize::Large
+    } else if SMALL_AIRCRAFT_TYPES.contains(&t) {
+        AircraftSize::Small
+    } else {
+        AircraftSize::Medium
     }
 }
 

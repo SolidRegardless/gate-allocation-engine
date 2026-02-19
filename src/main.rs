@@ -9,6 +9,38 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+// ── Server ───────────────────────────────────────────────────────────────────
+
+const GRPC_LISTEN_ADDR: &str = "[::]:50051";
+
+// ── CLI modes ────────────────────────────────────────────────────────────────
+
+const MODE_DEMO: &str = "demo";
+const MODE_SERVE: &str = "serve";
+
+// ── Demo scenario ─────────────────────────────────────────────────────────────
+
+/// IATA code of the airport modelled in the demo.
+const DEMO_AIRPORT: &str = "LHR";
+
+/// Airline whose flights are preferentially assigned to Terminal 5 gates.
+const AIRLINE_BRITISH_AIRWAYS: &str = "British Airways";
+
+/// Preferred gate list for British Airways (home terminal at LHR).
+const BA_PREFERRED_GATES: &[&str] = &["T5-A1", "T5-A2", "T5-B1", "T5-B2", "T5-B3"];
+
+/// Preferred gate list for non-BA carriers operating from Terminal 2.
+const OTHER_PREFERRED_GATES: &[&str] = &["T2-A1", "T2-B1", "T2-B2"];
+
+/// Flight delayed in the disruption phase of the demo.
+const DEMO_DELAY_FLIGHT: &str = "BA-303";
+
+/// Flight cancelled in the disruption phase of the demo.
+const DEMO_CANCEL_FLIGHT: &str = "LH-901";
+
+/// Gate taken out of service in the disruption phase of the demo.
+const DEMO_FAILED_GATE: &str = "T5-A1";
+
 fn seed_gates() -> Vec<Gate> {
     vec![
         Gate {
@@ -177,17 +209,11 @@ async fn run_demo() {
 
     println!("\n--- Phase 2: Morning Schedule -- Gate Allocation ---\n");
     for flight in seed_flights() {
-        let preferred = match flight.airline.as_str() {
-            "British Airways" => vec![
-                "T5-A1".into(),
-                "T5-A2".into(),
-                "T5-B1".into(),
-                "T5-B2".into(),
-                "T5-B3".into(),
-            ],
-            _ => vec!["T2-A1".into(), "T2-B1".into(), "T2-B2".into()],
+        let preferred: Vec<String> = match flight.airline.as_str() {
+            AIRLINE_BRITISH_AIRWAYS => BA_PREFERRED_GATES.iter().map(|&s| s.to_string()).collect(),
+            _ => OTHER_PREFERRED_GATES.iter().map(|&s| s.to_string()).collect(),
         };
-        let r = engine.allocate_gate(&flight, "LHR", &preferred);
+        let r = engine.allocate_gate(&flight, DEMO_AIRPORT, &preferred);
         if r.success {
             let a = r.assignment.as_ref().unwrap();
             println!(
@@ -207,11 +233,11 @@ async fn run_demo() {
     println!("--- Phase 3: Disruption Events ---\n");
 
     // Delay
-    println!("  [!] BA-303 from CDG delayed 45 minutes (fog)");
+    println!("  [!] {} from CDG delayed 45 minutes (fog)", DEMO_DELAY_FLIGHT);
     let r = engine.handle_disruption(DisruptionEvent {
         event_id: Uuid::new_v4(),
         disruption_type: DisruptionType::Delay,
-        affected_flight_id: "BA-303".into(),
+        affected_flight_id: DEMO_DELAY_FLIGHT.into(),
         description: "Fog at CDG".into(),
         reported_at: Utc::now(),
         delay_minutes: 45,
@@ -222,24 +248,24 @@ async fn run_demo() {
     }
 
     // Cancellation
-    println!("\n  [!] LH-901 from FRA cancelled (technical fault)");
+    println!("\n  [!] {} from FRA cancelled (technical fault)", DEMO_CANCEL_FLIGHT);
     let r = engine.handle_disruption(DisruptionEvent {
         event_id: Uuid::new_v4(),
         disruption_type: DisruptionType::Cancellation,
-        affected_flight_id: "LH-901".into(),
+        affected_flight_id: DEMO_CANCEL_FLIGHT.into(),
         description: "Hydraulic fault".into(),
         reported_at: Utc::now(),
         delay_minutes: 0,
     });
     println!("      -> {}", r.summary);
 
-    // Gate unavailable
-    println!("\n  [!] Gate T5-A1 out of service (jetbridge fault)");
+    // Gate unavailable — the gate to mark offline is passed in the `description` field.
+    println!("\n  [!] Gate {} out of service (jetbridge fault)", DEMO_FAILED_GATE);
     let r = engine.handle_disruption(DisruptionEvent {
         event_id: Uuid::new_v4(),
         disruption_type: DisruptionType::GateUnavailable,
         affected_flight_id: String::new(),
-        description: "T5-A1".into(),
+        description: DEMO_FAILED_GATE.into(), // gate_id of the failed gate
         reported_at: Utc::now(),
         delay_minutes: 0,
     });
@@ -274,7 +300,7 @@ async fn run_server() {
         }
     }
 
-    let addr = "[::]:50051".parse().unwrap();
+    let addr = GRPC_LISTEN_ADDR.parse().unwrap();
     println!("\n=====================================================================");
     println!("  Gate Allocation Engine -- gRPC Server");
     println!("  Listening on {}", addr);
@@ -294,12 +320,12 @@ async fn main() {
         .with_target(false)
         .init();
 
-    let mode = std::env::args().nth(1).unwrap_or_else(|| "demo".into());
+    let mode = std::env::args().nth(1).unwrap_or_else(|| MODE_DEMO.into());
     match mode.as_str() {
-        "demo" => run_demo().await,
-        "serve" => run_server().await,
+        MODE_DEMO => run_demo().await,
+        MODE_SERVE => run_server().await,
         other => {
-            eprintln!("Unknown mode: '{}'. Use 'demo' or 'serve'.", other);
+            eprintln!("Unknown mode: '{}'. Use '{}' or '{}'.", other, MODE_DEMO, MODE_SERVE);
             std::process::exit(1);
         }
     }
