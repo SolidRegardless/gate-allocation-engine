@@ -1,3 +1,5 @@
+![Gate Allocation Engine](banner.png)
+
 # Gate Allocation Engine
 
 **Aviation Gate Allocation & Disruption Optimisation Engine**
