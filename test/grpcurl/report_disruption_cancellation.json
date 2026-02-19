@@ -1,0 +1,16 @@
+{
+  "type": "CANCELLATION",
+  "affected_flight": {
+    "flight_id": "BA-001",
+    "airline": "British Airways",
+    "origin": "JFK",
+    "destination": "LHR",
+    "aircraft_type": "B777",
+    "scheduled_arrival_utc": 1773556200,
+    "scheduled_departure_utc": 1773566100,
+    "status": "SCHEDULED"
+  },
+  "description": "Hydraulic fault",
+  "reported_at_utc": 1773556200,
+  "delay_minutes": 0
+}

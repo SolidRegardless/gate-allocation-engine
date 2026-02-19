@@ -1,0 +1,14 @@
+{
+  "flight": {
+    "flight_id": "BA-001",
+    "airline": "British Airways",
+    "origin": "JFK",
+    "destination": "LHR",
+    "aircraft_type": "B777",
+    "scheduled_arrival_utc": 1773556200,
+    "scheduled_departure_utc": 1773566100,
+    "status": "SCHEDULED"
+  },
+  "airport_iata": "LHR",
+  "preferred_gates": ["T5-A1", "T5-A2"]
+}

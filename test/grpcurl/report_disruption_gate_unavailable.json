@@ -1,0 +1,16 @@
+{
+  "type": "GATE_UNAVAILABLE",
+  "affected_flight": {
+    "flight_id": "",
+    "airline": "",
+    "origin": "",
+    "destination": "",
+    "aircraft_type": "",
+    "scheduled_arrival_utc": 0,
+    "scheduled_departure_utc": 0,
+    "status": "FLIGHT_STATUS_UNKNOWN"
+  },
+  "description": "T5-A1",
+  "reported_at_utc": 1773556200,
+  "delay_minutes": 0
+}

@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package allocation;
+
+// ─────────────────────────────────────────────────────────────────────
+// Aviation Gate Allocation & Disruption Optimisation Service
+// ─────────────────────────────────────────────────────────────────────
+
+service AllocationService {
+  // Allocate a gate to a flight (or re-allocate during disruption)
+  rpc AllocateGate(AllocateGateRequest)       returns (AllocateGateResponse);
+
+  // Report a disruption event (delay, cancellation, diversion, etc.)
+  rpc ReportDisruption(DisruptionEvent)        returns (DisruptionResponse);
+
+  // Query current gate assignments for an airport
+  rpc GetGateAssignments(GateAssignmentsRequest) returns (GateAssignmentsResponse);
+
+  // Stream live disruption events (server-side streaming)
+  rpc StreamDisruptions(StreamDisruptionsRequest) returns (stream DisruptionEvent);
+}
+
+// ── Messages ────────────────────────────────────────────────────────
+
+message Flight {
+  string flight_id       = 1;   // e.g. "BA-1472"
+  string airline         = 2;   // e.g. "British Airways"
+  string origin          = 3;   // IATA code, e.g. "LHR"
+  string destination     = 4;   // IATA code, e.g. "JFK"
+  string aircraft_type   = 5;   // e.g. "A320", "B777"
+  int64  scheduled_arrival_utc  = 6;  // Unix timestamp
+  int64  scheduled_departure_utc = 7; // Unix timestamp
+  FlightStatus status    = 8;
+}
+
+message Gate {
+  string gate_id         = 1;   // e.g. "T5-A14"
+  string terminal        = 2;
+  GateSize size          = 3;
+  bool   is_available    = 4;
+}
+
+message GateAssignment {
+  string assignment_id   = 1;
+  Flight flight          = 2;
+  Gate   gate            = 3;
+  int64  assigned_from_utc = 4;
+  int64  assigned_until_utc = 5;
+}
+
+// ── Enums ───────────────────────────────────────────────────────────
+
+enum FlightStatus {
+  FLIGHT_STATUS_UNKNOWN    = 0;
+  SCHEDULED                = 1;
+  BOARDING                 = 2;
+  DEPARTED                 = 3;
+  EN_ROUTE                 = 4;
+  ARRIVED                  = 5;
+  DELAYED                  = 6;
+  CANCELLED                = 7;
+  DIVERTED                 = 8;
+}
+
+enum GateSize {
+  GATE_SIZE_UNKNOWN = 0;
+  SMALL             = 1;  // Regional jets (E190, ATR72)
+  MEDIUM            = 2;  // Narrow-body (A320, B737)
+  LARGE             = 3;  // Wide-body  (A350, B777, B787)
+}
+
+enum DisruptionType {
+  DISRUPTION_TYPE_UNKNOWN = 0;
+  DELAY                   = 1;
+  CANCELLATION            = 2;
+  DIVERSION               = 3;
+  GATE_UNAVAILABLE        = 4;
+  WEATHER                 = 5;
+  MECHANICAL              = 6;
+}
+
+// ── Request / Response ──────────────────────────────────────────────
+
+message AllocateGateRequest {
+  Flight flight              = 1;
+  string airport_iata        = 2;  // e.g. "LHR"
+  repeated string preferred_gates = 3;
+}
+
+message AllocateGateResponse {
+  bool   success             = 1;
+  GateAssignment assignment  = 2;
+  string message             = 3;
+}
+
+message DisruptionEvent {
+  string event_id            = 1;
+  DisruptionType type        = 2;
+  Flight affected_flight     = 3;
+  string description         = 4;
+  int64  reported_at_utc     = 5;
+  int32  delay_minutes       = 6;  // 0 for cancellations
+}
+
+message DisruptionResponse {
+  bool   acknowledged        = 1;
+  repeated GateAssignment reassignments = 2;
+  string summary             = 3;
+}
+
+message GateAssignmentsRequest {
+  string airport_iata        = 1;
+  string terminal            = 2;  // optional filter
+}
+
+message GateAssignmentsResponse {
+  repeated GateAssignment assignments = 1;
+}
+
+message StreamDisruptionsRequest {
+  string airport_iata        = 1;
+}
