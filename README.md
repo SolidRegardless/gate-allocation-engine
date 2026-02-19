@@ -458,43 +458,146 @@ Five tests in `src/engine/mod.rs`:
 | `cancellation_frees_gate` | Gate becomes available after cancellation |
 | `prefers_requested_gate` | Scoring rewards preferred gate selection |
 
-### gRPC testing with grpcurl
+### gRPC integration tests with grpcurl
 
-Start the server, then use the fixtures in `test/grpcurl/`:
+Seven request fixtures live in `test/grpcurl/`. Run them against a live server
+to exercise every RPC end-to-end.
+
+#### Install grpcurl
 
 ```bash
-# Shared flags
-PROTO="-import-path proto -proto allocation.proto"
-ADDR="localhost:50051"
-SVC="allocation.AllocationService"
+# macOS
+brew install grpcurl
 
-# Allocate a gate for a B777
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/AllocateGate \
+# Windows (winget)
+winget install fullstorydev.grpcurl
+
+# Windows (Chocolatey)
+choco install grpcurl
+
+# Direct download — pre-built binaries for all platforms
+# https://github.com/fullstorydev/grpcurl/releases
+```
+
+Verify: `grpcurl --version`
+
+#### Start the server
+
+Run natively or via Docker — the test commands are identical either way.
+
+```bash
+# Native
+cargo run -- serve
+
+# Docker (build once, run any time)
+docker build -t gate-allocation-engine .
+docker run -d --name gate-alloc -p 50051:50051 gate-allocation-engine
+docker logs gate-alloc   # confirm "Listening on [::]:50051"
+```
+
+#### Test sequence
+
+> **Note:** the server is stateful and in-memory. The calls below build on each
+> other — run them in order for a complete scenario. Restarting the server
+> resets all state.
+
+All commands are run from the project root.
+
+**1. Allocate a gate — `AllocateGate`**
+
+Requests a Large gate for a B777, with T5-A1 and T5-A2 as preferred gates.
+
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/AllocateGate \
   < test/grpcurl/allocate_gate.json
+```
 
-# Report a 45-minute delay
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/ReportDisruption \
+Expected: `success: true`, flight assigned to `T5-A1` with `score: -3.0`
+(preferred gate reward applied).
+
+**2. Report a delay — `ReportDisruption`**
+
+Delays the allocated flight (BA-001) by 45 minutes.
+
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/ReportDisruption \
   < test/grpcurl/report_disruption_delay.json
+```
 
-# Report a cancellation
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/ReportDisruption \
-  < test/grpcurl/report_disruption_cancellation.json
+Expected: `acknowledged: true`, assignment window shifted forward 45 minutes,
+flight status updated to `DELAYED`. No re-allocation needed if the gate is
+still free after the shift.
 
-# Take a gate offline (triggers re-allocation)
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/ReportDisruption \
-  < test/grpcurl/report_disruption_gate_unavailable.json
+**3. Query all assignments — `GetGateAssignments`**
 
-# Query all current assignments
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/GetGateAssignments \
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/GetGateAssignments \
   < test/grpcurl/get_gate_assignments.json
+```
 
-# Query T5 assignments only
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/GetGateAssignments \
+Expected: the single delayed assignment with updated `assigned_from_utc` /
+`assigned_until_utc` timestamps.
+
+**4. Query by terminal — `GetGateAssignments` (T5 filter)**
+
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/GetGateAssignments \
   < test/grpcurl/get_gate_assignments_t5.json
+```
 
-# Open the live disruption stream
-grpcurl -plaintext $PROTO -d @ $ADDR $SVC/StreamDisruptions \
+Expected: same result as above (the assignment is in T5). An empty terminal
+field in the request returns all terminals.
+
+**5. Take a gate offline — `ReportDisruption` (GateUnavailable)**
+
+Marks T5-A1 as unavailable. Any flights assigned to it are automatically
+re-allocated to the next best gate.
+
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/ReportDisruption \
+  < test/grpcurl/report_disruption_gate_unavailable.json
+```
+
+Expected: `acknowledged: true`, BA-001 re-allocated to `T5-A2` (next available
+Large gate), new `assignment_id` issued.
+
+> **Note:** for `GateUnavailable` events the `description` field carries the
+> gate ID to take offline (e.g. `"T5-A1"`). `affected_flight` can be left
+> blank — the engine looks up all flights at that gate automatically.
+
+**6. Cancel a flight — `ReportDisruption` (Cancellation)**
+
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/ReportDisruption \
+  < test/grpcurl/report_disruption_cancellation.json
+```
+
+Expected: `acknowledged: true`, summary confirms gate freed
+(`"BA-001 cancelled - 1 gate(s) freed"`). A subsequent `GetGateAssignments`
+call will return an empty list.
+
+**7. Live disruption stream — `StreamDisruptions`**
+
+```bash
+grpcurl -plaintext -proto proto/allocation.proto \
+  -d @ localhost:50051 allocation.AllocationService/StreamDisruptions \
   < test/grpcurl/stream_disruptions.json
+```
+
+Expected: the stream opens and closes immediately with no events — this RPC is
+a documented stub ready for a `broadcast::Sender` implementation (see
+[Ideas for Extension](#ideas-for-extension)).
+
+#### Clean up
+
+```bash
+docker rm -f gate-alloc
 ```
 
 ---
